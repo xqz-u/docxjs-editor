@@ -13,8 +13,51 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Code is required' }, { status: 400 });
     }
     let docxBlob: Blob;
+
+    // 1. Get the full path to the JSON files
+    const assessmentPath = path.join(
+      process.cwd(),
+      'public',
+      'assets',
+      'Complete_VAPP',
+      'assessment.json'
+    );
+    const questionnairePath = path.join(
+      process.cwd(),
+      'public',
+      'assets',
+      'questionnaire.json'
+    );
+    // 2. Read the raw text content using the basic 'fs' module function
+    const assessmentJson = await fs.readFile(assessmentPath, 'utf-8');
+    const questionnaireJson = await fs.readFile(questionnairePath, 'utf-8');
+    // 3. Parse the JSON strings into objects
+    const assessment = JSON.parse(assessmentJson);
+    const questionnaire = JSON.parse(questionnaireJson);
+    // 4. Also add the logos
+    const commissionBannerPath = path.join(
+      process.cwd(),
+      'public',
+      'assets',
+      'commission-banner.b64'
+    );
+    const unitLogoPath = path.join(
+      process.cwd(),
+      'public',
+      'assets',
+      'unit-logo.b64'
+    );
+    const commissionBanner = await fs.readFile(commissionBannerPath, 'utf-8');
+    const unitLogo = await fs.readFile(unitLogoPath, 'utf-8');
+
     try {
-      docxBlob = await buildDocx(code);
+      docxBlob = await buildDocx(
+        code,
+        assessment,
+        questionnaire,
+        commissionBanner,
+        unitLogo
+      );
     } catch (err) {
       console.error(err);
       return NextResponse.json(

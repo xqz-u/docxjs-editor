@@ -4,9 +4,23 @@
  */
 import { buildDocx } from '@/lib/build-docx';
 
-self.onmessage = (event: MessageEvent<{ name: string; text: string }>) => {
-  const { name, text } = event.data;
-  buildDocx(text)
+// 👇 1. Define the shape of the incoming assets
+interface AssetData {
+  assessment: object;
+  questionnaire: object;
+  commissionBanner: string;
+  unitLogo: string;
+}
+
+self.onmessage = (
+  event: MessageEvent<{ name: string; text: string; assets: AssetData }>
+) => {
+  const {
+    name,
+    text,
+    assets: { questionnaire, assessment, commissionBanner, unitLogo },
+  } = event.data;
+  buildDocx(text, assessment, questionnaire, commissionBanner, unitLogo)
     .then((blob) => {
       self.postMessage({
         status: 'success',

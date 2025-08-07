@@ -52,3 +52,7 @@ tmp.*
 
 # Temporary docx files
 media/
+
+public/assets/Complete_VAPP
+public/assets/questionnaire.json
+public/assets/*.b64

@@ -23,6 +23,15 @@ export function Editor({ declarationFiles }: { declarationFiles: TextFile[] }) {
     buildErrors,
     setBuildError,
   } = useDocumentsStore((state) => state);
+
+  // 👇 1. Add state to hold your fetched JSON assets
+  const [assets, setAssets] = useState<{
+    assessment: object;
+    questionnaire: object;
+    commissionBanner: string;
+    unitLogo: string;
+  } | null>(null);
+
   const [, setIsCompiling] = useState<boolean>(false);
   const workerRef = useRef<Worker | null>(
     (() => {
@@ -33,6 +42,39 @@ export function Editor({ declarationFiles }: { declarationFiles: TextFile[] }) {
       }
     })()
   );
+
+  // 👇 2. Add a useEffect to fetch assets when the component mounts
+  useEffect(() => {
+    const fetchAssets = async () => {
+      try {
+        const assessmentRes = await fetch(
+          '/assets/Complete_VAPP/assessment.json'
+        );
+        const assessment = await assessmentRes.json();
+        const questionnaireRes = await fetch('/assets/questionnaire.json');
+        const questionnaire = await questionnaireRes.json();
+
+        const commissionBannerRes = await fetch(
+          '/assets/commission-banner.b64'
+        );
+        const commissionBanner = await commissionBannerRes.text();
+        const unitLogoRes = await fetch('/assets/unit-logo.b64');
+        const unitLogo = await unitLogoRes.text();
+
+        setAssets({ assessment, questionnaire, commissionBanner, unitLogo });
+      } catch (e) {
+        if (e instanceof Error) {
+          // Handle potential error if JSON files fail to load
+          console.error('Failed to load JSON assets:', e);
+          setOutput({
+            globalError: 'Failed to load required JSON assets. ' + e.message,
+          });
+        }
+      }
+    };
+
+    fetchAssets();
+  }, [setOutput]); // The empty dependency array ensures this runs only once.
 
   // terminate worker
   useEffect(() => {
@@ -109,16 +151,20 @@ export function Editor({ declarationFiles }: { declarationFiles: TextFile[] }) {
   // re-build on active tab change or any document change
   useEffect(() => {
     const activeFile = documents.find((doc) => doc.name === activeTab);
-    if (activeFile && workerRef.current) {
+    // 👇 3. Add a guard to ensure assets are loaded before compiling
+    if (activeFile && workerRef.current && assets) {
       // reset error message when we start compiling
       setOutput({ globalError: undefined }); // this will re-render Preview
       setIsCompiling(true); // compile if there is an active file
+      // 👇 4. Modify the payload to include the fetched assets
       workerRef.current.postMessage({
         name: activeFile.name,
         text: activeFile.text,
+        assets,
       });
     }
-  }, [documents, activeTab, setOutput]);
+    // 👇 5. Add 'assets' to the dependency array
+  }, [documents, activeTab, setOutput, assets]);
 
   if (!openTabs.length) {
     return (
