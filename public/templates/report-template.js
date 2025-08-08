@@ -1,5 +1,84 @@
 import * as docx from 'docx';
 
+const evaluateDefaultCheck = (
+  { question_id, op },
+  storedAnswers,
+  questions
+) => {
+  if (!(question_id in storedAnswers)) return false;
+
+  const { default_answer } = questions[question_id];
+
+  let normalizedAnswer;
+  let normalizedDefault;
+  const currentAnswer = storedAnswers[question_id];
+
+  if (Array.isArray(currentAnswer) && Array.isArray(default_answer)) {
+    // Avoid difference in comparisons due to answer ordering
+    normalizedAnswer = _.sortBy(currentAnswer);
+    normalizedDefault = _.sortBy(default_answer);
+  } else {
+    normalizedAnswer = currentAnswer.trim();
+    normalizedDefault = default_answer.trim();
+  }
+
+  // Compare normalized values
+  if (op === 'NEQ_DEFAULT')
+    return !_.isEqual(normalizedAnswer, normalizedDefault);
+  return false;
+};
+
+const evaluateLiteral = (guard, answers) => {
+  const answer = answers[guard.question_id];
+  // string or undefined case; should never happen actually
+  return Array.isArray(answer) && answer.includes(guard.answer_id);
+};
+
+const evaluateGuard = (guard, answers, questions) => {
+  if (guard === null) {
+    return true;
+  }
+  // Besides others, free text questions all have null guards and will enter the
+  // above conditional. So cast `answers` according to the type expected by `evaluateLiteral`
+  if (!Array.isArray(guard)) {
+    if ('op' in guard) {
+      return evaluateDefaultCheck(guard, answers, questions);
+    } else {
+      return evaluateLiteral(guard, answers);
+    }
+  }
+  const [operator, ...args] = guard;
+  switch (operator) {
+    case 'AND':
+      return args.every((arg) => evaluateGuard(arg, answers, questions));
+    case 'OR':
+      return args.some((arg) => evaluateGuard(arg, answers, questions));
+    default: {
+      // TypeScript pattern to ensure exhaustive checking of operators
+      const _exhaustiveCheck = operator;
+      return _exhaustiveCheck;
+    }
+  }
+};
+
+const findNextQuestionId = (flows, currentAnswers, questions) => {
+  if (!flows.length) return null;
+
+  const defaultFlow = flows.find((flow) => !flow.guard);
+  const guardedFlows = flows.filter((flow) => flow.guard);
+
+  // Try guarded flows first
+  const matchingGuardedFlow = guardedFlows
+    .filter((flow) => evaluateGuard(flow.guard, currentAnswers, questions))
+    .sort((f0, f1) => f1.priority - f0.priority)[0];
+
+  if (matchingGuardedFlow) {
+    return matchingGuardedFlow.target_question_id;
+  }
+
+  return defaultFlow?.target_question_id ?? null;
+};
+
 const flattenQuestionnaire = (modularQuestionnaire) => {
   const flatQuestionnaire = {};
   Object.values(modularQuestionnaire).forEach((module) => {
@@ -81,45 +160,180 @@ const computeScoreVector = (userAnswers, questionnaire, riskDimensions) => {
  * @see https://docx.js.org/
  */
 function generateDocument() {
-  const showFreeTextAnswer = (querySerial, assessment, questionnaire) =>
-    assessment.content.questionnaireProgress.answers[
-      findQuestionIdBySerial(querySerial, questionnaire)
-    ];
-
+  /**
+   * @param {object} [options={}] - Optional parameters for customization.
+   * @param {object} [options.paragraphOptions={}] - Custom styles for the answer's Paragraph.
+   * @param {object} [options.textOptions={}] - Custom styles for the answer's TextRun.
+   * @param {object} [options.selectedTextOptions={}] - Custom styles for selected answers' TextRun(s).
+   */
   const showAllAnswersToChoiceQuestion = (
     serial,
     assessment,
-    questionnaire
+    questionnaire,
+    options = {}
   ) => {
+    const {
+      paragraphOptions = {},
+      textOptions = {},
+      selectedTextOptions = { bold: true, underline: true, ...textOptions },
+    } = options;
+
     const questionId = findQuestionIdBySerial(serial, questionnaire);
     const possibleAnswers = questionnaire[questionId].answers;
     const selectedAnswerIds =
       assessment.content.questionnaireProgress.answers[questionId];
+
     return possibleAnswers.map(({ id, content }, index) => {
       const isSelectedAnswer = selectedAnswerIds.includes(id);
+
       return new docx.Paragraph({
+        bullet: { level: 0 },
+        spacing: { after: index === possibleAnswers.length - 1 ? 0 : 50 },
+        ...paragraphOptions,
         children: [
           new docx.TextRun({
             text: content,
-            underline: isSelectedAnswer,
-            bold: isSelectedAnswer,
+            // Use textOptions for unselected, and the more specific
+            // selectedTextOptions for selected items.
+            ...(isSelectedAnswer ? selectedTextOptions : textOptions),
           }),
         ],
-        bullet: { level: 0 },
-        spacing: { after: index === possibleAnswers.length - 1 ? 0 : 50 },
       });
     });
   };
 
-  const showAnswerToChoiceQuestion = (serial, assessment, questionnaire) => {
+  /**
+   * @param {object} [options={}] - Optional parameters for customization.
+   * @param {object} [options.paragraphOptions={}] - Custom styles for the answer's Paragraph.
+   * @param {object} [options.textOptions={}] - Custom styles for the answer's TextRun.
+   */
+  const showAnswer = (serial, assessment, questionnaire, options = {}) => {
+    const { paragraphOptions = {}, textOptions = {} } = options;
+
     const questionId = findQuestionIdBySerial(serial, questionnaire);
-    const [answerId] =
+    if (!questionId) return [];
+
+    const question = questionnaire[questionId];
+    const answerData =
       assessment.content.questionnaireProgress.answers[questionId];
-    const answer = questionnaire[questionId].answers.find(
-      ({ id }) => id === answerId
+    if (!answerData) return [];
+
+    if (question.type !== 'FREE_TEXT') {
+      const selectedAnswerIds = Array.isArray(answerData)
+        ? answerData
+        : [answerData];
+      const selectedAnswers = question.answers.filter((possibleAnswer) =>
+        selectedAnswerIds.includes(possibleAnswer.id)
+      );
+      return selectedAnswers.map(
+        ({ content }) =>
+          new docx.Paragraph({
+            ...paragraphOptions,
+            children: [new docx.TextRun({ text: content, ...textOptions })],
+          })
+      );
+    }
+
+    return [
+      new docx.Paragraph({
+        ...paragraphOptions,
+        children: [new docx.TextRun({ text: answerData, ...textOptions })],
+      }),
+    ];
+  };
+
+  const showAnswerConditionally = (
+    serial,
+    assessment,
+    questionnaire,
+    hidingConditions,
+    title
+  ) => {
+    const questionId = findQuestionIdBySerial(serial, questionnaire);
+    const allAnswers = assessment.content.questionnaireProgress.answers;
+    const userAnswers = allAnswers[questionId];
+    // NOTE assuming serial does not refer to a free text question & userAnswers is a list
+    const answersData = userAnswers.map((answerId) =>
+      questionnaire[questionId].answers.find(({ id }) => id === answerId)
     );
-    if (answer !== undefined)
-      return new docx.Paragraph({ text: answer.content });
+    const answerContents = answersData.map(({ content }) => content);
+    if (hidingConditions.some((cond) => answerContents.includes(cond))) {
+      return [];
+    }
+    const dependentQuestionId = findNextQuestionId(
+      questionnaire[questionId].flows,
+      allAnswers,
+      questionnaire
+    );
+    const dependentQuestion = questionnaire[dependentQuestionId];
+    return [
+      new docx.Paragraph({
+        children: [new docx.TextRun({ text: title, bold: true })],
+        spacing: { before: 200, after: 200 },
+      }),
+      ...showAnswer(dependentQuestion.serial, assessment, questionnaire),
+    ];
+  };
+
+  /**
+   * Creates a self-contained block with a formatted title and its corresponding answer.
+   *
+   * @param {string} serial - The question serial number used to find the answer.
+   * @param {string} title - The text to display as the question's title.
+   * @param {object} assessment - The assessment object.
+   * @param {object} questionnaire - The questionnaire object.
+   * @param {object} [options={}] - Optional parameters for customization.
+   * @param {'default' | 'allOptions'} [options.displayType='default'] - The type of answer display.
+   * @param {object} [options.titleParagraphOptions={}] - Custom styles for the title's Paragraph.
+   * @param {object} [options.titleTextOptions={}] - Custom styles for the title's TextRun.
+   * @param {object} [options.answerParagraphOptions={}] - Custom styles for the answer's Paragraph(s).
+   * @param {object} [options.answerTextOptions={}] - Custom styles for the answer's TextRun(s).
+   * @returns {Array<docx.Paragraph>} An array of docx objects for the block.
+   */
+  const createQuestionBlock = (
+    serial,
+    title,
+    assessment,
+    questionnaire,
+    options = {}
+  ) => {
+    const {
+      displayType = 'default',
+      titleParagraphOptions = {},
+      titleTextOptions = {},
+      answerParagraphOptions = {},
+      answerTextOptions = {},
+      answerSelectedTextOptions,
+    } = options;
+
+    const titleParagraph = new docx.Paragraph({
+      spacing: { before: 200, after: 200 },
+      ...titleParagraphOptions,
+      children: [
+        new docx.TextRun({ text: title, bold: true, ...titleTextOptions }),
+      ],
+    });
+
+    const answerOptions = {
+      paragraphOptions: answerParagraphOptions,
+      textOptions: answerTextOptions,
+      ...(answerSelectedTextOptions && {
+        selectedTextOptions: answerSelectedTextOptions,
+      }),
+    };
+
+    const answerFunction =
+      displayType === 'allOptions'
+        ? showAllAnswersToChoiceQuestion
+        : showAnswer;
+    const answerParagraphs = answerFunction(
+      serial,
+      assessment,
+      questionnaire,
+      answerOptions
+    );
+
+    return [titleParagraph, ...answerParagraphs];
   };
 
   const createScoreTable = (scores) => {
@@ -171,74 +385,53 @@ function generateDocument() {
 
   const createTitlePage = (assessment, questionnaire) => {
     return [
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Vulnerability Assessment for',
-            bold: true,
-            size: 44, // 22pt font size
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 1500 }, // Spacing from top of the page
+      ...createQuestionBlock(
+        '3.1',
+        'Vulnerability Assessment for',
+        assessment,
+        questionnaire,
+        {
+          titleParagraphOptions: {
+            spacing: { before: 800 },
+            alignment: docx.AlignmentType.CENTER,
+          },
+          titleTextOptions: { size: 36, italics: true, bold: false },
+          answerParagraphOptions: {
+            spacing: { before: 800 },
+            alignment: docx.AlignmentType.CENTER,
+          },
+          answerTextOptions: { size: 44 },
+        }
+      ),
+      ...createQuestionBlock('2.1.1', 'located at', assessment, questionnaire, {
+        titleParagraphOptions: {
+          spacing: { before: 800 },
+          alignment: docx.AlignmentType.CENTER,
+        },
+        titleTextOptions: { size: 36, italics: true },
+        answerParagraphOptions: {
+          spacing: { before: 800 },
+          alignment: docx.AlignmentType.CENTER,
+        },
+        answerTextOptions: { size: 44 },
       }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: showFreeTextAnswer('3.1', assessment, questionnaire),
-            size: 44,
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 800 }, // Spacing between lines
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'located at',
-            italics: true,
-            size: 36, // 18pt font size
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 800 },
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: showFreeTextAnswer('2.1.1', assessment, questionnaire),
-            size: 44,
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 800 },
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'on date(s)',
-            italics: true,
-            size: 36,
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 800 },
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: showFreeTextAnswer('3.6.1', assessment, questionnaire),
-            size: 44,
-          }),
-        ],
-        alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 800 },
+      ...createQuestionBlock('3.6.1', 'on date(s)', assessment, questionnaire, {
+        titleParagraphOptions: {
+          spacing: { before: 800 },
+          alignment: docx.AlignmentType.CENTER,
+        },
+        titleTextOptions: { size: 36, italics: true },
+        answerParagraphOptions: {
+          spacing: { before: 800 },
+          alignment: docx.AlignmentType.CENTER,
+        },
+        answerTextOptions: { size: 44 },
       }),
       new docx.Paragraph({
         children: [
           new docx.TextRun({
             text: `Assessment date: ${new Date().toISOString()}`,
-            size: 28, // 14pt font size
+            size: 28,
           }),
         ],
         alignment: docx.AlignmentType.CENTER,
@@ -258,7 +451,6 @@ function generateDocument() {
   };
 
   const createDisclaimers = () => {
-    // Content for the first box
     const firstBoxParagraphs = [
       new docx.Paragraph({
         children: [
@@ -309,7 +501,6 @@ function generateDocument() {
       }),
     ];
 
-    // Content for the second box
     const secondBoxParagraphs = [
       new docx.Paragraph({
         children: [
@@ -333,7 +524,6 @@ function generateDocument() {
       }),
     ];
 
-    // Define the border style for the cells
     const cellBorders = {
       top: { style: docx.BorderStyle.SINGLE, size: 6, color: 'auto' },
       bottom: { style: docx.BorderStyle.SINGLE, size: 6, color: 'auto' },
@@ -341,7 +531,6 @@ function generateDocument() {
       right: { style: docx.BorderStyle.SINGLE, size: 6, color: 'auto' },
     };
 
-    // Create the first table (box)
     const table1 = new docx.Table({
       width: { size: 100, type: docx.WidthType.PERCENTAGE },
       rows: [
@@ -357,7 +546,6 @@ function generateDocument() {
       ],
     });
 
-    // Create the second table (box)
     const table2 = new docx.Table({
       width: { size: 100, type: docx.WidthType.PERCENTAGE },
       rows: [
@@ -388,70 +576,46 @@ function generateDocument() {
         heading: docx.HeadingLevel.HEADING_1,
         spacing: { after: 200 },
       }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Description of the venue location',
-            bold: true,
-          }),
-        ],
-        spacing: { after: 200 },
-      }),
-      new docx.Paragraph({
-        text: showFreeTextAnswer('2.1.1', assessment, questionnaire),
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Sectors applicable for this location',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      ...showAllAnswersToChoiceQuestion('2.2', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Venue location type',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('2.7', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Venue type characteristics',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      new docx.Paragraph({
-        text: showFreeTextAnswer('2.7.1', assessment, questionnaire),
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Overall size (gross area)',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('2.13', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Characteristics of surrounding area',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('2.10', assessment, questionnaire),
+      ...createQuestionBlock(
+        '2.1.1',
+        'Description of the venue location',
+        assessment,
+        questionnaire,
+        {
+          titleParagraphOptions: { spacing: { after: 200 } },
+        }
+      ),
+      ...createQuestionBlock(
+        '2.2',
+        'Sectors applicable for this location',
+        assessment,
+        questionnaire,
+        { displayType: 'allOptions' }
+      ),
+      ...createQuestionBlock(
+        '2.7',
+        'Venue location type',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '2.7.1',
+        'Venue type characteristics',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '2.13',
+        'Overall size (gross area)',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '2.10',
+        'Characteristics of surrounding area',
+        assessment,
+        questionnaire
+      ),
       new docx.Paragraph({
         children: [
           new docx.TextRun({
@@ -466,120 +630,196 @@ function generateDocument() {
 
   const createEventInformation = (assessment, questionnaire) => {
     return [
-      new docx.Paragraph({ text: '' }),
       new docx.Paragraph({
         text: 'Event Information',
         heading: docx.HeadingLevel.HEADING_1,
         spacing: { before: 200, after: 200 },
       }),
+      ...createQuestionBlock(
+        '3.2',
+        'Main activities (program/agenda)',
+        assessment,
+        questionnaire,
+        { titleParagraphOptions: { spacing: { after: 200 } } }
+      ),
+      ...createQuestionBlock('3.5', 'Frequency', assessment, questionnaire),
+      ...createQuestionBlock('3.6', 'Duration', assessment, questionnaire),
+      ...createQuestionBlock(
+        '3.8',
+        'Event opening and closing times for the public (day/time)',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '3.9',
+        'Maximum expected attendance',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '3.11',
+        'Expected average crowd density (participants/m²)',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '3.16',
+        'At what level is the event known?',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '3.17',
+        "Activity/event's character",
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '3.19',
+        'Media coverage and live broadcasting',
+        assessment,
+        questionnaire
+      ),
+    ];
+  };
+
+  const createThreatInformation = (assessment, questionnaire) => {
+    return [
       new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Main activities (program/agenda)',
-            bold: true,
-          }),
-        ],
-        spacing: { after: 200 },
-      }),
-      new docx.Paragraph({
-        text: showFreeTextAnswer('3.2', assessment, questionnaire),
-        spacing: { after: 200 },
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Frequency',
-            bold: true,
-          }),
-        ],
-        spacing: { after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.5', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Duration',
-            bold: true,
-          }),
-        ],
+        text: 'Threat-related Information',
+        heading: docx.HeadingLevel.HEADING_1,
         spacing: { before: 200, after: 200 },
       }),
-      showAnswerToChoiceQuestion('3.6', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Event opening and closing times for the public (day/time)',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      new docx.Paragraph({
-        text: showFreeTextAnswer('3.8', assessment, questionnaire),
-        spacing: { after: 200 },
-      }),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Maximum expected attendance',
-            bold: true,
-          }),
-        ],
-        spacing: { after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.9', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Expected average crowd density (participants/m²)',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.11', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'At what level is the event known?',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.16', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: "Activity/event's character",
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.17', assessment, questionnaire),
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: 'Media coverage and live broadcasting',
-            bold: true,
-          }),
-        ],
-        spacing: { before: 200, after: 200 },
-      }),
-      showAnswerToChoiceQuestion('3.19', assessment, questionnaire),
+      ...showAnswerConditionally(
+        '4.1.1',
+        assessment,
+        questionnaire,
+        ['No such categorization exists'],
+        'Current national terrorism threat level'
+      ),
+      ...createQuestionBlock(
+        '4.1.2',
+        'Availability of information on completed/foiled/planned attacks and detail of provided analysis from national authorities',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.1.3',
+        'Availability of information on active terrorist groups and relevant trends (e.g. political of ideology motivated) from national authorities',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.1.4',
+        'Availability of information on local threat level from authorities',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.1.5',
+        'Local threat level at the moment of the assessment',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.2',
+        'Specific threats/public statements by potential aggressors against civil targets or entities directly connected to the venue/event activity (e.g. owners/operators, suppliers)?',
+        assessment,
+        questionnaire
+      ),
+      ...showAnswerConditionally(
+        '4.3.2',
+        assessment,
+        questionnaire,
+        ['No', 'Not known'],
+        'When were these specific threats/public statements made?'
+      ),
+      ...createQuestionBlock(
+        '4.3.3',
+        'Have similar civil targets been subjected to attacks in the past?',
+        assessment,
+        questionnaire
+      ),
+      ...showAnswerConditionally(
+        '4.3.3',
+        assessment,
+        questionnaire,
+        ['No', 'Not known'],
+        'When did the most recent attacks(s) happen?'
+      ),
+      ...showAnswerConditionally(
+        '4.3.4',
+        assessment,
+        questionnaire,
+        ['No', 'Not known'],
+        'Previous incidents and suspicious activities at venue location'
+      ),
+      ...createQuestionBlock(
+        '4.3.5',
+        'Has the venue location undergone a specific threat assessment in the past and is it available?',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.6',
+        "Venue's notoriety",
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.7',
+        'Iconic status (symbolic/historical/cultural value) of the venue location',
+        assessment,
+        questionnaire
+      ),
+
+      ...createQuestionBlock(
+        '4.3.8',
+        'Presence of VIPs of infamous/controversial entities at the activity/event?',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.9',
+        "Does the event itself of the associated activity represent a religious/ethno-nationalist/extremism ideology that may be considered 'contrary and/or offensive' according to certain belief systems or ideological/moral agendas?",
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.11',
+        'What type of threat actor may be particularly interested in the venue location and its activities/events?',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.11.2',
+        'Main motivations for the choice of this type of threat actor',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.12',
+        'Modus operandi considered most credible for an actual attack and therefore considered a priority?',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.3.12.2',
+        'Main motivations for this choice of this type of modus operandi',
+        assessment,
+        questionnaire
+      ),
+      ...createQuestionBlock(
+        '4.4.2',
+        'Justification for the exclusion of standard threat scenarios from the scope of this assessment',
+        assessment,
+        questionnaire
+      ),
     ];
   };
 
   const newPage = () =>
     new docx.Paragraph({ children: [new docx.PageBreak()] });
-
-  // Fetch the JSON data
-  // const assessmentResponse = await fetch('/assets/Complete_VAPP/assessment.json');
-  // const ASSESSMENT = await assessmentResponse.json();
-
-  // const questionnaireResponse = await fetch('/assets/questionnaire.json');
-  // const QUESTIONNAIRE = await questionnaireResponse.json();
 
   const FLAT_QUESTIONNAIRE = flattenQuestionnaire(QUESTIONNAIRE);
   const UNIQUE_RISK_DIMENSIONS =
@@ -596,7 +836,6 @@ function generateDocument() {
     UNIQUE_RISK_DIMENSIONS
   );
 
-  // 2. BUILD THE DOCUMENT STRUCTURE
   const doc = new docx.Document({
     sections: [
       {
@@ -702,6 +941,8 @@ function generateDocument() {
           ...createVenueInformation(ASSESSMENT, FLAT_QUESTIONNAIRE),
           newPage(),
           ...createEventInformation(ASSESSMENT, FLAT_QUESTIONNAIRE),
+          newPage(),
+          ...createThreatInformation(ASSESSMENT, FLAT_QUESTIONNAIRE),
           newPage(),
           // --- Score Summary Section ---
           new docx.Paragraph({
