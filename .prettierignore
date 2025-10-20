@@ -9,7 +9,8 @@ pnpm-lock.yaml
 .next
 out
 .cache
-public
+# public
+# !public/templates/report-template.js
 
 # misc
 .DS_Store

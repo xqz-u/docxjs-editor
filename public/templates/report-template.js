@@ -160,6 +160,9 @@ const computeScoreVector = (userAnswers, questionnaire, riskDimensions) => {
  * @see https://docx.js.org/
  */
 function generateDocument() {
+  const newPage = () =>
+    new docx.Paragraph({ children: [new docx.PageBreak()] });
+
   /**
    * @param {object} [options={}] - Optional parameters for customization.
    * @param {object} [options.paragraphOptions={}] - Custom styles for the answer's Paragraph.
@@ -408,7 +411,7 @@ function generateDocument() {
           spacing: { before: 800 },
           alignment: docx.AlignmentType.CENTER,
         },
-        titleTextOptions: { size: 36, italics: true },
+        titleTextOptions: { size: 36, italics: true, bold: false },
         answerParagraphOptions: {
           spacing: { before: 800 },
           alignment: docx.AlignmentType.CENTER,
@@ -420,7 +423,7 @@ function generateDocument() {
           spacing: { before: 800 },
           alignment: docx.AlignmentType.CENTER,
         },
-        titleTextOptions: { size: 36, italics: true },
+        titleTextOptions: { size: 36, italics: true, bold: false },
         answerParagraphOptions: {
           spacing: { before: 800 },
           alignment: docx.AlignmentType.CENTER,
@@ -818,8 +821,636 @@ function generateDocument() {
     ];
   };
 
-  const newPage = () =>
-    new docx.Paragraph({ children: [new docx.PageBreak()] });
+  const createThreatRating = (images, useBarCharts = false) => {
+    const chartB64 = useBarCharts
+      ? images.threatRatingBarChart
+      : images.threatRatingRadarChart;
+
+    const threatRatingChart = chartB64
+      ? new docx.Paragraph({
+          children: [
+            new docx.ImageRun({
+              data: chartB64.replace('data:image/png;base64,', ''),
+              type: 'png',
+              transformation: { width: 400, height: 400 },
+            }),
+          ],
+          spacing: { before: 200, after: 200 },
+        })
+      : new docx.Paragraph({
+          text: 'THERE SHOULD BE AN IMAGE HERE',
+          spacing: { after: 200 },
+        });
+    return [
+      new docx.Paragraph({
+        text: 'Threat Rating',
+        heading: docx.HeadingLevel.HEADING_1,
+        spacing: { before: 200, after: 200 },
+      }),
+
+      new docx.Paragraph({
+        text: "The Threat Rating in this assessment considers the availability of national & local threat information sources, the public's awareness regarding terrorism-related threats and eventual preparedness guidance. It also evaluates the venue and event-specific threat history.",
+        spacing: { after: 200 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Results for the assessed venue and event/activity:',
+            bold: true,
+          }),
+        ],
+        spacing: { after: 400 }, // Added extra spacing for the plot area
+      }),
+
+      threatRatingChart,
+
+      new docx.Paragraph({
+        text: 'The Threat Rating is presented as a factor ranging from 0 ‘Very Low’ (Dark Green) to 1 ‘Very High’ (Dark Red). It is shown as a continuous scale. Colours are associated with a score range and level.',
+        spacing: { after: 200 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'The ',
+          }),
+          new docx.TextRun({
+            text: 'overall Threat Rating T',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' is composed of four main factors, representing: Operational capability T',
+          }),
+          new docx.TextRun({
+            text: 'oc',
+            subScript: true,
+          }),
+          new docx.TextRun({
+            text: ', Intention & History T',
+          }),
+          new docx.TextRun({
+            text: 'ih',
+            subScript: true,
+          }),
+          new docx.TextRun({
+            text: ', Activity T',
+          }),
+          new docx.TextRun({
+            text: 'ac',
+            subScript: true,
+          }),
+          new docx.TextRun({
+            text: ' and Operating Environment T',
+          }),
+          new docx.TextRun({
+            text: 'oe',
+            subScript: true,
+          }),
+          new docx.TextRun({
+            text: '.',
+          }),
+        ],
+        spacing: { after: 400 }, // Added extra spacing for the table area
+      }),
+
+      // --- You can insert your rating table here ---
+
+      new docx.Paragraph({
+        text: 'All factors are equally weighed. They represent:',
+        spacing: { after: 200 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Operational Capability',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' is the acquired, assessed, or demonstrated level of operational capability to conduct terrorist attacks. It includes the required expertise & technical training, associated resources & costs (weapons, manpower, material), as well as the difficulty to obtain such resources.',
+          }),
+        ],
+        bullet: { level: 0 },
+        spacing: { after: 100 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Intention & History',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' represents two closely related factors. Intention is the motivation of terrorists to conduct an attack. History addresses the fact that previous attempts are potentially good indicators of future attempts. It also reflects the fact that local or regional and recent attempts are potentially better indicators.',
+          }),
+        ],
+        bullet: { level: 0 },
+        spacing: { after: 100 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Activity',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' considers the level of terrorist activity in a country. Such activity may not always present a threat to local interests as terrorists may use countries as support bases and may not want to jeopardize their status by conducting terrorist acts there.',
+          }),
+        ],
+        bullet: { level: 0 },
+        spacing: { after: 100 },
+      }),
+
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Operating Environment',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' considers how the overall environment, including political and security considerations, influences the ability and motivation of terrorists to conduct an attack.',
+          }),
+        ],
+        bullet: { level: 0 },
+        spacing: { after: 200 },
+      }),
+
+      new docx.Paragraph({
+        text: 'Questions in the assessment process may influence only one or several of these factors.',
+      }),
+    ];
+  };
+
+  const createVulnerabilityRatingSection = (images, useBarCharts = false) => {
+    const chartB64 = useBarCharts
+      ? images.vulnerabilityRatingBarChart
+      : images.vulnerabilityRatingRadarChart;
+
+    const vulnerabilityRatingChart = chartB64
+      ? new docx.Paragraph({
+          children: [
+            new docx.ImageRun({
+              data: chartB64.replace('data:image/png;base64,', ''),
+              type: 'png',
+              transformation: { width: 400, height: 400 },
+            }),
+          ],
+          spacing: { before: 200, after: 200 },
+        })
+      : new docx.Paragraph({
+          text: 'THERE SHOULD BE AN IMAGE HERE',
+          spacing: { after: 200 },
+        });
+
+    return [
+      new docx.Paragraph({
+        text: 'Vulnerability Rating',
+        heading: docx.HeadingLevel.HEADING_1,
+        spacing: { before: 200, after: 200 },
+      }),
+      new docx.Paragraph({
+        text: 'The Vulnerability Rating in this assessment focuses on analysing the vulnerabilities of the venue location and the related activity/event. It considers potential vulnerabilities through a structured approach based on best practice and relevant criteria. Vulnerabilities may be related to certain areas/sectors of the venue location, to a specific attack type/modus operandi or to deficiencies in the human, technical and organizational domain.',
+        spacing: { after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Vulnerability Rating results for the assessed venue and event/activity:',
+            bold: true,
+          }),
+        ],
+        spacing: { after: 400 }, // Added extra spacing for the plot area
+      }),
+      vulnerabilityRatingChart,
+      new docx.Paragraph({
+        text: 'The Vulnerability Rating is presented as a factor ranging from 0 ‘Very Low’ (Green) to 1 ‘Very High’ (Red). It is shown as a continuous scale. Colours are associated with a score range and level.',
+        spacing: { after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun('The '),
+          new docx.TextRun({
+            text: 'overall Vulnerability Rating V',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun(
+            ' is composed of ten factors, representing: Importance V'
+          ),
+          new docx.TextRun({ text: 'im', subScript: true }),
+          new docx.TextRun(', Business continuity - Resilience V'),
+          new docx.TextRun({ text: 'bcr', subScript: true }),
+          new docx.TextRun(', Reputational damage V'),
+          new docx.TextRun({ text: 'rd', subScript: true }),
+          new docx.TextRun(', Venue Location V'),
+          new docx.TextRun({ text: 'lc', subScript: true }),
+          new docx.TextRun(', Symbolism V'),
+          new docx.TextRun({ text: 'sy', subScript: true }),
+          new docx.TextRun(', Accessibility V'),
+          new docx.TextRun({ text: 'ac', subScript: true }),
+          new docx.TextRun(', Uniqueness V'),
+          new docx.TextRun({ text: 'un', subScript: true }),
+          new docx.TextRun(', Attendance & Distribution V'),
+          new docx.TextRun({ text: 'ad', subScript: true }),
+          new docx.TextRun(', Existing measures V'),
+          new docx.TextRun({ text: 'em', subScript: true }),
+          new docx.TextRun(' and Media attention V'),
+          new docx.TextRun({ text: 'ma', subScript: true }),
+          new docx.TextRun('.'),
+        ],
+      }),
+      new docx.Paragraph({
+        text: 'All factors are equally weighed. They consider the following aspects:',
+        spacing: { before: 200, after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Importance', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' depends on the public space’s functions, its interdependencies with other facilities and the collateral consequences for the state and the society of a potential attack.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Business continuity, Resilience',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' is a factor taking into account the amount of time required to continue (in a degraded way) or re-establish operations and activities. This can be either temporary or permanent.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Reputational damage',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' accounts for the perception of reputational repercussions associated with a potential attack. Considerations could include adverse publicity, erosion of confidence, and the perception of poor security. Note that reputational damage is to a certain degree dependent on media attention.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Venue Location.',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' This factor reflects the assumption that events and activities depending on their physical location are more likely to be the targets of an attack and that for example the threat is higher near major population centres.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Symbolism', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' is linked to the prominence, iconic value and attractiveness of a public space as a potential target and its probability of being considered as promoting a lifestyle that is against the political, social or religious ideology of attackers. Popular tourist locations, landmarks and cultural sites but also spaces that may be associated with ethnic or racial minorities. It accounts for the fact that some public spaces are more controversial and well known. This factor is based on the assumption that public spaces that have a high symbolism value are more likely targets.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Accessibility',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' is a measure of the venue’s ‘openness’ and how difficult it would be for an aggressor to enter. This factor addresses the degree of a controlled perimeter or access control.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Uniqueness', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' is a factor that assesses how common the type of public space or venue is within the surrounding environment. It reflects the greater likelihood that an aggressor will attempt to target a particular location if it is the only one of its kind (its uniqueness).',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Attendance & Distribution',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: " accounts for the maximum number of people (personnel and visitors) present in the public space, their importance (VIP presence) and the associated variation over time and space (throughout the venue site). This considers the likelihood that an aggressor tries to maximize the attack's impact by targeting locations with high crowd density and/or presence of VIPs.",
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Existing measures',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' considers security measures that are already present in the examined public space or venue and may render it less attractive to attackers and/or the presence of vulnerabilities that make it more appealing to aggressors.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Media attention',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' focuses on the publicity the aggressor could expect if targeting a specific venue location and event/activity.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        text: 'Questions in the assessment process may influence only one or several of these factors.',
+        spacing: { before: 200 },
+      }),
+    ];
+  };
+
+  const createHtoSection = (images, useBarCharts = false) => {
+    const chartB64 = useBarCharts
+      ? images.vulnerabilityRatingBarChart
+      : images.vulnerabilityRatingRadarChart;
+
+    const htoChart = chartB64
+      ? new docx.Paragraph({
+          children: [
+            new docx.ImageRun({
+              data: chartB64.replace('data:image/png;base64,', ''),
+              type: 'png',
+              transformation: { width: 400, height: 400 },
+            }),
+          ],
+          spacing: { before: 200, after: 200 },
+        })
+      : new docx.Paragraph({
+          text: 'THERE SHOULD BE AN IMAGE HERE',
+          spacing: { after: 200 },
+        });
+
+    return [
+      new docx.Paragraph({
+        text: 'HTO concept assessing the comprehensiveness of measures:',
+        heading: docx.HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 200 },
+      }),
+      new docx.Paragraph({
+        text: 'The HTO (Human, Technical, Organizational) concept is commonly applied to analyse complex activities. In this context, a comprehensive security setup should be composed of all three components. In the HTO concept:',
+        spacing: { after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'The “Human (H)”',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' stands for aspects that are individual and at the same time important to perform a task or a change. Such aspects may, for example, include individual skill, knowledge, experiences or established relations with other people.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'The “Technical (T)”',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' stands for technical system and can be divided into two parts. A technical system can be evaluated in relation to technical limitations, problems (both recurrent and stochastic), availability, and reliability. Technical systems can also assist decision-makers as illustrated by information systems, hardware and software used as support tools.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'The “Organizational (O)“',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' component comprises how an activity is organized and structured. Examples are responsibilities and powers, policies and strategies. This also includes rules, procedures and other factors, whether formal or informal.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        text: 'The report presents a separate vulnerability rating for every one of these factors. It may provide an orientation where to direct efforts for example for the implementation of new, complementary measures.',
+        spacing: { before: 200, after: 200 },
+      }),
+      htoChart,
+    ];
+  };
+
+  const createAttackPhaseSection = () => {
+    return [
+      new docx.Paragraph({
+        text: 'Vulnerability ratings associated with distinctive attack phases',
+        heading: docx.HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 200 },
+      }),
+      new docx.Paragraph({
+        text: 'In asset protection, measures have often a specific function that refers to distinctive phases prior or during an attack. These are:',
+        spacing: { after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Prepare, Prevent and Deter:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' A good state of preparedness is generally associated with a high level of resilience and a low level of vulnerability. Certain aspects comprising the preparedness level are visible to a potential aggressor, having a deterrence function. Therefore, this factor influences the target selection process, as successful deterrence may eventually avoid an attack.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Detect:', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' If an attack occurs, early detection is a crucial factor to limit consequences and be able to initiate an appropriate response. Detection mostly occurs through human observation and/or technical systems.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Alert and Assess:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' To initiate an appropriate response, the detection is transformed into an alert and a process that assesses the severity of the incident. If deemed credible and serious, it initiates the response.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Delay:', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' The progression of aggressors can be hindered through delay measures, thereby gaining valuable time for intervention forces to respond.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Protect and Deny:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' In some cases, effective protective measures can deny aggressor access. This can be the case for a hardened building or site perimeter, for example a bollard stopping a hostile vehicle.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Respond and Recover:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' The response capability determines the ability to defend against or eventually defeat an aggressor. Following the containment or elimination of the threat, recovery actions initiate to re-establish ‘normal’ functioning.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        text: 'The report presents a separate vulnerability rating for every one of these phases. Some phases may be unsuitable or difficult to implement for certain venue locations, especially those with a high degree of ‘openness’. Nevertheless, this evaluation may provide an orientation for the direction of reinforcement efforts.',
+        spacing: { before: 200, after: 200 },
+      }),
+
+      // attackPhasesChart,
+    ];
+  };
+
+  const createAttackFocusSection = () => {
+    return [
+      new docx.Paragraph({
+        text: 'Assessment focus according to attack phases',
+        heading: docx.HeadingLevel.HEADING_2,
+        spacing: { before: 200, after: 200 },
+      }),
+      new docx.Paragraph({
+        text: 'Vulnerabilities may also be associated with the aggressor’s attack phases. These are:',
+        spacing: { after: 200 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Target selection:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' This phase is related to the target selection process before an attack. All factors presented in the overall Vulnerability rating V presented above may contribute to this process.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Planning and Dry run:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' Following the identification of a suitable target, the planning phase of the attack may involve observing, testing and probing existing security measures. Some of these activities may be detectable, potentially disrupting an attack before it occurs.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({ text: 'Execution:', bold: true, italics: true }),
+          new docx.TextRun({
+            text: ' During the execution phase of an attack, the objective of an aggressor is to maximize the impact. Effective countermeasures can limit this impact.',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: 'Escape and exploitation:',
+            bold: true,
+            italics: true,
+          }),
+          new docx.TextRun({
+            text: ' Escape in the aftermath of an attack may be of importance to aggressors (this for example is not the case in any ‘suicide attack’). This evaluation focuses on the aggressor’s objective to exploit and provide visibility to the attack. Media attention and live broadcasting are therefore important factors (even if self-streaming by aggressors over the internet is becoming a more common feature).',
+          }),
+        ],
+        bullet: { level: 0 },
+      }),
+      new docx.Paragraph({
+        text: 'Hereunder, the report does not evaluate a degree of vulnerability but presents an overview to what extent the assessment focused on different adversary attack phases.',
+        spacing: { before: 200, after: 200 },
+      }),
+
+      // Placeholder for the Attack Phases pie chart
+      // attackPhasesPieChart,
+    ];
+  };
+
+  const createVulnerabilityRating = (images, useBarCharts = false) => {
+    return [
+      ...createVulnerabilityRatingSection(images, useBarCharts),
+      ...createHtoSection(images, useBarCharts),
+      ...createAttackPhaseSection(),
+      ...createAttackFocusSection(),
+    ];
+  };
+
+  const createHighlightedRun = (text) => {
+    return new docx.TextRun({
+      text: text,
+      color: 'FFFFFF', // White text
+      shading: {
+        type: docx.ShadingType.SOLID,
+        fill: '#003399', // Blue color
+      },
+    });
+  };
 
   const FLAT_QUESTIONNAIRE = flattenQuestionnaire(QUESTIONNAIRE);
   const UNIQUE_RISK_DIMENSIONS =
@@ -934,6 +1565,8 @@ function generateDocument() {
           newPage(),
           ...createDisclaimers(ASSESSMENT),
           newPage(),
+          createHighlightedRun(2),
+          newPage(),
           new docx.TableOfContents('Table of Contents', {
             hyperlink: true,
             headingStyleRange: '1-5',
@@ -943,6 +1576,10 @@ function generateDocument() {
           ...createEventInformation(ASSESSMENT, FLAT_QUESTIONNAIRE),
           newPage(),
           ...createThreatInformation(ASSESSMENT, FLAT_QUESTIONNAIRE),
+          newPage(),
+          ...createThreatRating({}),
+          newPage(),
+          ...createVulnerabilityRating({}),
           newPage(),
           // --- Score Summary Section ---
           new docx.Paragraph({
